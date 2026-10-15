@@ -1,3 +1,36 @@
 <resources>
-    <string name="app_name">Proyectofinalgrupo2</string>
+    <string name="app_name">Asiste+</string>
+    <string name="app_subtitle">Control de Asistencias - Cibertec</string>
+    
+    <!-- Pantalla Inicio -->
+    <string name="menu_tomar_asistencia">Tomar Asistencia</string>
+    <string name="menu_tomar_asistencia_desc">Seleccionar curso y registrar asistencia de la sesión</string>
+    <string name="menu_gestion_local">Gestión Local SQLite</string>
+    <string name="menu_gestion_local_desc">CRUD completo sin conexión: buscar, modificar y eliminar</string>
+    <string name="menu_historial">Historial y Filtros</string>
+    <string name="menu_historial_desc">Consultar asistencias por curso, fecha o estudiante</string>
+    <string name="menu_sincronizar">Sincronización con Servidor</string>
+    <string name="menu_sincronizar_desc">Enviar registros pendientes a la API REST de Asiste+</string>
+    
+    <!-- Estados de Asistencia -->
+    <string name="estado_presente">Presente</string>
+    <string name="estado_tardanza">Tardanza</string>
+    <string name="estado_ausente">Ausente</string>
+    
+    <!-- Acciones Generales -->
+    <string name="btn_guardar">Guardar Registros</string>
+    <string name="btn_actualizar">Actualizar</string>
+    <string name="btn_eliminar">Eliminar</string>
+    <string name="btn_cancelar">Cancelar</string>
+    <string name="btn_sincronizar_ahora">Sincronizar Ahora</string>
+    <string name="btn_marcar_todos_presentes">Marcar Todos Presentes</string>
+    <string name="btn_filtrar">Filtrar</string>
+    <string name="btn_limpiar">Limpiar Filtros</string>
+    
+    <!-- Mensajes -->
+    <string name="msg_sin_conexion">Sin conexión al servidor. Trabajando en modo local (SQLite).</string>
+    <string name="msg_guardado_local_exito">Asistencias guardadas exitosamente en SQLite local.</string>
+    <string name="msg_sincronizado_exito">Sincronizado correctamente con el servidor PostgreSQL.</string>
+    <string name="msg_error_duplicado">Ya existe asistencia para este estudiante en la misma fecha.</string>
+    <string name="msg_confirmar_eliminar">¿Está seguro de eliminar este registro de asistencia?</string>
 </resources>

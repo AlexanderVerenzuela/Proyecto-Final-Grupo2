@@ -13,3 +13,9 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Backend, Base de Datos y Web Admin alojados en repositorio backend independiente
+/backend/
+/database/
+/web-admin/
+/docs/

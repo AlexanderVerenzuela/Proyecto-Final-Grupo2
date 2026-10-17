@@ -168,29 +168,91 @@ class TomarAsistenciaActivity : AppCompatActivity() {
         }
 
         // 2. Intentar sincronización inmediata con la API REST si hay conexión
-        apiClient.sincronizarLote(asistenciasParaGuardar) { successSync, syncCount, errSync ->
+        apiClient.sincronizarLote(asistenciasParaGuardar) { successSync, resultados, errSync ->
+
             binding.progressBarTomar.visibility = View.GONE
             binding.btnGuardarAsistencia.isEnabled = true
 
-            if (successSync && syncCount > 0) {
-                // Marcar registros como sincronizados en SQLite
-                asistenciasParaGuardar.forEach { item ->
-                    dbHelper.marcarComoSincronizado(item.id, (item.remotoId ?: 1))
+            if (successSync) {
+
+                val exitosos = resultados.filter { it.success }
+                val fallidos = resultados.filter { !it.success }
+
+                // Marcar solamente los registros confirmados por el servidor
+                exitosos.forEach { resultado ->
+
+                    if (resultado.remotoId != null) {
+                        dbHelper.marcarComoSincronizado(
+                            resultado.localId,
+                            resultado.remotoId
+                        )
+                    }
                 }
 
-                AlertDialog.Builder(this)
-                    .setTitle("¡Registro Exitoso!")
-                    .setMessage("Se registraron $guardadosLocalCount asistencias en SQLite local y se sincronizaron $syncCount correctamente con el servidor PostgreSQL.")
-                    .setCancelable(false)
-                    .setPositiveButton("Finalizar") { _, _ -> finish() }
-                    .show()
+                when {
+
+                    fallidos.isEmpty() -> {
+
+                        AlertDialog.Builder(this)
+                            .setTitle("¡Registro Exitoso!")
+                            .setMessage(
+                                "Se registraron $guardadosLocalCount asistencias " +
+                                        "y todas fueron sincronizadas correctamente con PostgreSQL."
+                            )
+                            .setCancelable(false)
+                            .setPositiveButton("Finalizar") { _, _ ->
+                                finish()
+                            }
+                            .show()
+                    }
+
+                    exitosos.isNotEmpty() -> {
+
+                        AlertDialog.Builder(this)
+                            .setTitle("Registro parcialmente sincronizado")
+                            .setMessage(
+                                "Se guardaron $guardadosLocalCount asistencias localmente.\n\n" +
+                                        "${exitosos.size} fueron sincronizadas correctamente.\n" +
+                                        "${fallidos.size} quedaron pendientes de sincronización.\n\n" +
+                                        "Puedes sincronizarlas posteriormente desde Gestión Local."
+                            )
+                            .setCancelable(false)
+                            .setPositiveButton("Finalizar") { _, _ ->
+                                finish()
+                            }
+                            .show()
+                    }
+
+                    else -> {
+
+                        AlertDialog.Builder(this)
+                            .setTitle("Guardado Localmente")
+                            .setMessage(
+                                "Las $guardadosLocalCount asistencias se guardaron correctamente en SQLite, " +
+                                        "pero ninguna pudo sincronizarse con el servidor.\n\n" +
+                                        "Quedarán pendientes para una próxima sincronización."
+                            )
+                            .setCancelable(false)
+                            .setPositiveButton("Entendido") { _, _ ->
+                                finish()
+                            }
+                            .show()
+                    }
+                }
+
             } else {
-                // Modo offline / fallo de sincronización
+
                 AlertDialog.Builder(this)
                     .setTitle("Guardado Localmente en SQLite")
-                    .setMessage("Se guardaron $guardadosLocalCount asistencias en la base de datos local SQLite.\n\nSin embargo, el servidor no respondió ($errSync). Quedan como 'Pendientes de sincronización'.")
+                    .setMessage(
+                        "Se guardaron $guardadosLocalCount asistencias en la base de datos local SQLite.\n\n" +
+                                "El servidor no respondió:\n$errSync\n\n" +
+                                "Todas permanecerán pendientes de sincronización."
+                    )
                     .setCancelable(false)
-                    .setPositiveButton("Entendido") { _, _ -> finish() }
+                    .setPositiveButton("Entendido") { _, _ ->
+                        finish()
+                    }
                     .show()
             }
         }

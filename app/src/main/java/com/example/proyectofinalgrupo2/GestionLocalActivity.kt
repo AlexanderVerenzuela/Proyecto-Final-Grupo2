@@ -158,12 +158,72 @@ class GestionLocalActivity : AppCompatActivity() {
             .setMessage("¿Desea eliminar el registro local #${asistencia.id} de ${asistencia.alumnoNombre} del día ${asistencia.fecha}?\n\nEsta operación modificará la base de datos SQLite.")
             .setIcon(android.R.drawable.ic_dialog_alert)
             .setPositiveButton("Eliminar") { _, _ ->
-                val rows = dbHelper.eliminarAsistencia(asistencia.id)
-                if (rows > 0) {
-                    Toast.makeText(this, "Registro eliminado de SQLite", Toast.LENGTH_SHORT).show()
-                    cargarRegistrosLocales()
+
+                // Si el registro ya existe en PostgreSQL,
+                // primero debemos eliminarlo del servidor.
+                if (asistencia.remotoId != null) {
+
+                    binding.progressBarLocal.visibility = View.VISIBLE
+
+                    apiClient.eliminarAsistenciaRemota(
+                        asistencia.remotoId
+                    ) { success, error ->
+
+                        binding.progressBarLocal.visibility = View.GONE
+
+                        if (success) {
+
+                            val rows = dbHelper.eliminarAsistencia(asistencia.id)
+
+                            if (rows > 0) {
+                                Toast.makeText(
+                                    this,
+                                    "Asistencia eliminada correctamente.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+
+                                cargarRegistrosLocales()
+                            } else {
+                                Toast.makeText(
+                                    this,
+                                    "Se eliminó del servidor, pero no del almacenamiento local.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+
+                        } else {
+
+                            AlertDialog.Builder(this)
+                                .setTitle("No se pudo eliminar")
+                                .setMessage(
+                                    "La asistencia no se eliminó porque el servidor no confirmó la operación.\n\n" +
+                                            "$error"
+                                )
+                                .setPositiveButton("Entendido", null)
+                                .show()
+                        }
+                    }
+
                 } else {
-                    Toast.makeText(this, "No se pudo eliminar el registro", Toast.LENGTH_SHORT).show()
+
+                    // Nunca llegó al servidor: solo existe localmente.
+                    val rows = dbHelper.eliminarAsistencia(asistencia.id)
+
+                    if (rows > 0) {
+                        Toast.makeText(
+                            this,
+                            "Registro local eliminado.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        cargarRegistrosLocales()
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "No se pudo eliminar el registro.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
             .setNegativeButton("Cancelar", null)
@@ -174,31 +234,83 @@ class GestionLocalActivity : AppCompatActivity() {
     // SINCRONIZACIÓN DE PENDIENTES CON EL SERVIDOR
     // =================================================================
     private fun sincronizarPendientes() {
+
         val pendientes = dbHelper.listarPendientesSincronizacion()
+
         if (pendientes.isEmpty()) {
-            Toast.makeText(this, "No hay registros pendientes de sincronización", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "No hay registros pendientes de sincronización",
+                Toast.LENGTH_SHORT
+            ).show()
+
             return
         }
 
         binding.progressBarLocal.visibility = View.VISIBLE
         binding.btnSincronizarLocal.isEnabled = false
 
-        apiClient.sincronizarLote(pendientes) { success, sincronizados, error ->
+        apiClient.sincronizarLote(pendientes) { success, resultados, error ->
+
             binding.progressBarLocal.visibility = View.GONE
             binding.btnSincronizarLocal.isEnabled = true
 
             if (success) {
-                // Marcar como sincronizados en SQLite
-                pendientes.forEach { item ->
-                    dbHelper.marcarComoSincronizado(item.id, (item.remotoId ?: 1))
+
+                val exitosos = resultados.filter { it.success }
+                val fallidos = resultados.filter { !it.success }
+
+                // Marcar SOLO los registros confirmados por PostgreSQL
+                exitosos.forEach { resultado ->
+
+                    if (resultado.remotoId != null) {
+                        dbHelper.marcarComoSincronizado(
+                            resultado.localId,
+                            resultado.remotoId
+                        )
+                    }
                 }
 
-                Toast.makeText(this, "Se sincronizaron $sincronizados registros con PostgreSQL", Toast.LENGTH_LONG).show()
                 cargarRegistrosLocales()
+
+                when {
+                    fallidos.isEmpty() -> {
+                        Toast.makeText(
+                            this,
+                            "Se sincronizaron ${exitosos.size} registros correctamente con PostgreSQL.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+
+                    exitosos.isNotEmpty() -> {
+                        Toast.makeText(
+                            this,
+                            "${exitosos.size} sincronizados. ${fallidos.size} quedaron pendientes.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+
+                    else -> {
+                        AlertDialog.Builder(this)
+                            .setTitle("Sincronización no realizada")
+                            .setMessage(
+                                "Ningún registro pudo sincronizarse.\n\n" +
+                                        "Los registros siguen guardados localmente."
+                            )
+                            .setPositiveButton("Entendido", null)
+                            .show()
+                    }
+                }
+
             } else {
+
                 AlertDialog.Builder(this)
                     .setTitle("Error de Sincronización")
-                    .setMessage("No se pudo conectar con el servidor: $error.\nLos registros siguen guardados en SQLite local.")
+                    .setMessage(
+                        "No se pudo conectar con el servidor:\n\n" +
+                                "$error\n\n" +
+                                "Los registros siguen guardados en SQLite local."
+                    )
                     .setPositiveButton("Entendido", null)
                     .show()
             }

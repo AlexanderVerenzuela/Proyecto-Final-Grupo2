@@ -140,6 +140,15 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
                 put(COL_CURSO_SECCION, "T5BN")
                 put(COL_CURSO_CICLO, "V")
                 put(COL_CURSO_CREDITOS, 3)
+            },
+            ContentValues().apply {
+                put(COL_CURSO_ID, 4)
+                put(COL_CURSO_CODIGO, "GES-504")
+                put(COL_CURSO_NOMBRE, "Gestión de Proyectos de Software")
+                put(COL_CURSO_DOCENTE, "Dra. Elena Ruiz Castillo")
+                put(COL_CURSO_SECCION, "T5BN")
+                put(COL_CURSO_CICLO, "V")
+                put(COL_CURSO_CREDITOS, 3)
             }
         )
         cursos.forEach { db.insert(TABLE_CURSOS, null, it) }
@@ -185,6 +194,30 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
                 put(COL_ALUMNO_APELLIDOS, "Morales Vega")
                 put(COL_ALUMNO_CORREO, "diego.morales@cibertec.edu.pe")
                 put(COL_ALUMNO_TELEFONO, "987445566")
+            },
+            ContentValues().apply {
+                put(COL_ALUMNO_ID, 6)
+                put(COL_ALUMNO_CODIGO, "I20231006")
+                put(COL_ALUMNO_NOMBRES, "Valeria Nicole")
+                put(COL_ALUMNO_APELLIDOS, "Sánchez Castro")
+                put(COL_ALUMNO_CORREO, "valeria.sanchez@cibertec.edu.pe")
+                put(COL_ALUMNO_TELEFONO, "987556677")
+            },
+            ContentValues().apply {
+                put(COL_ALUMNO_ID, 7)
+                put(COL_ALUMNO_CODIGO, "I20231007")
+                put(COL_ALUMNO_NOMBRES, "Mateo Sebastián")
+                put(COL_ALUMNO_APELLIDOS, "Flores Cárdenas")
+                put(COL_ALUMNO_CORREO, "mateo.flores@cibertec.edu.pe")
+                put(COL_ALUMNO_TELEFONO, "987667788")
+            },
+            ContentValues().apply {
+                put(COL_ALUMNO_ID, 8)
+                put(COL_ALUMNO_CODIGO, "I20231008")
+                put(COL_ALUMNO_NOMBRES, "Camila Belén")
+                put(COL_ALUMNO_APELLIDOS, "Reyes Medina")
+                put(COL_ALUMNO_CORREO, "camila.reyes@cibertec.edu.pe")
+                put(COL_ALUMNO_TELEFONO, "987778899")
             }
         )
         alumnos.forEach { db.insert(TABLE_ALUMNOS, null, it) }

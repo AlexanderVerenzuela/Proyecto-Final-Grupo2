@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.example.proyectofinalgrupo2.api.ApiClient
 import com.example.proyectofinalgrupo2.data.DatabaseHelper
 import com.example.proyectofinalgrupo2.databinding.ActivityMainBinding
+import com.example.proyectofinalgrupo2.api.ResultadoSincronizacion
 
 class MainActivity : AppCompatActivity() {
 
@@ -85,49 +86,107 @@ class MainActivity : AppCompatActivity() {
 
     private fun ejecutarSincronizacionCompleta() {
         binding.progressBarMain.visibility = View.VISIBLE
-        Toast.makeText(this, "Iniciando sincronización...", Toast.LENGTH_SHORT).show()
 
-        // 1. Obtener registros pendientes de SQLite
+        Toast.makeText(
+            this,
+            "Iniciando sincronización...",
+            Toast.LENGTH_SHORT
+        ).show()
+
         val pendientes = dbHelper.listarPendientesSincronizacion()
 
-        // 2. Enviar pendientes al servidor REST
-        apiClient.sincronizarLote(pendientes) { successSync, totalSync, errSync ->
+        if (pendientes.isEmpty()) {
+            binding.progressBarMain.visibility = View.GONE
+
+            Toast.makeText(
+                this,
+                "No hay registros pendientes de sincronización.",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            return
+        }
+
+        apiClient.sincronizarLote(pendientes) { successSync, resultados, errSync ->
+
             if (successSync) {
-                // Marcar en SQLite como sincronizados
-                pendientes.forEach { item ->
-                    dbHelper.marcarComoSincronizado(item.id, (item.remotoId ?: 1))
+
+                val exitosos = resultados.filter { it.success }
+                val fallidos = resultados.filter { !it.success }
+
+                // Marcar SOLO los registros confirmados por el servidor
+                exitosos.forEach { resultado ->
+
+                    if (resultado.remotoId != null) {
+                        dbHelper.marcarComoSincronizado(
+                            resultado.localId,
+                            resultado.remotoId
+                        )
+                    }
                 }
 
-                // 3. Descargar cursos actualizados del servidor
+                // Actualizar catálogos locales
                 apiClient.getCursos { successCursos, cursos, _ ->
+
                     if (successCursos && cursos.isNotEmpty()) {
                         dbHelper.guardarCursosCache(cursos)
                     }
 
-                    // 4. Descargar alumnos actualizados del servidor
                     apiClient.getAlumnos { successAlumnos, alumnos, _ ->
+
                         if (successAlumnos && alumnos.isNotEmpty()) {
                             dbHelper.guardarAlumnosCache(alumnos)
                         }
 
                         binding.progressBarMain.visibility = View.GONE
+
                         actualizarContadoresLocales()
                         comprobarEstadoServidor()
 
+                        val mensaje = when {
+                            fallidos.isEmpty() -> {
+                                "Se sincronizaron ${exitosos.size} registro(s) correctamente con PostgreSQL.\n\n" +
+                                        "Los catálogos locales también fueron actualizados."
+                            }
+
+                            exitosos.isNotEmpty() -> {
+                                "${exitosos.size} registro(s) se sincronizaron correctamente.\n\n" +
+                                        "${fallidos.size} registro(s) quedaron pendientes y podrán intentarse nuevamente."
+                            }
+
+                            else -> {
+                                "Ningún registro pudo sincronizarse.\n\n" +
+                                        "Los registros permanecen guardados localmente."
+                            }
+                        }
+
                         AlertDialog.Builder(this)
-                            .setTitle("Sincronización Completada")
-                            .setMessage("Se sincronizaron $totalSync registro(s) con el servidor PostgreSQL y se actualizaron los catálogos locales.")
+                            .setTitle(
+                                if (fallidos.isEmpty()) {
+                                    "Sincronización completada"
+                                } else {
+                                    "Sincronización parcial"
+                                }
+                            )
+                            .setMessage(mensaje)
                             .setPositiveButton("Aceptar", null)
                             .show()
                     }
                 }
+
             } else {
+
                 binding.progressBarMain.visibility = View.GONE
+
                 actualizarContadoresLocales()
 
                 AlertDialog.Builder(this)
                     .setTitle("Aviso de Sincronización")
-                    .setMessage("No se pudo conectar con el servidor ($errSync). Los registros permanecerán seguros en SQLite local hasta la próxima sincronización.")
+                    .setMessage(
+                        "No se pudo conectar con el servidor.\n\n" +
+                                "$errSync\n\n" +
+                                "Los registros permanecen guardados en SQLite local y se podrán sincronizar posteriormente."
+                    )
                     .setPositiveButton("Entendido", null)
                     .show()
             }

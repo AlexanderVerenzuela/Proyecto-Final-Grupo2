@@ -16,6 +16,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
+data class ResultadoSincronizacion(
+    val localId: Long,
+    val remotoId: Int?,
+    val success: Boolean,
+    val message: String
+)
+
 class ApiClient private constructor(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("asiste_plus_prefs", Context.MODE_PRIVATE)
@@ -243,26 +250,36 @@ class ApiClient private constructor(private val context: Context) {
     // =================================================================
     fun sincronizarLote(
         pendientes: List<Asistencia>,
-        callback: (success: Boolean, sincronizados: Int, error: String?) -> Unit
+        callback: (
+            success: Boolean,
+            resultados: List<ResultadoSincronizacion>,
+            error: String?
+        ) -> Unit
     ) {
         if (pendientes.isEmpty()) {
-            callback(true, 0, null)
+            callback(true, emptyList(), null)
             return
         }
 
         executor.execute {
             var conn: HttpURLConnection? = null
+
             try {
                 val url = URL("${getBaseUrl()}/api/asistencias/sincronizar")
+
                 conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 8000
                     readTimeout = 8000
                     doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                    setRequestProperty(
+                        "Content-Type",
+                        "application/json; charset=UTF-8"
+                    )
                 }
 
                 val itemsArray = JSONArray()
+
                 pendientes.forEach { a ->
                     val item = JSONObject().apply {
                         put("local_id", a.id)
@@ -272,6 +289,7 @@ class ApiClient private constructor(private val context: Context) {
                         put("estado", a.estado)
                         put("observacion", a.observacion)
                     }
+
                     itemsArray.put(item)
                 }
 
@@ -279,28 +297,170 @@ class ApiClient private constructor(private val context: Context) {
                     put("items", itemsArray)
                 }
 
-                val writer = OutputStreamWriter(conn.outputStream, "UTF-8")
+                val writer = OutputStreamWriter(
+                    conn.outputStream,
+                    "UTF-8"
+                )
+
                 writer.write(payload.toString())
                 writer.flush()
                 writer.close()
 
                 val code = conn.responseCode
+
                 if (code in 200..299) {
-                    val reader = BufferedReader(InputStreamReader(conn.inputStream))
+
+                    val reader = BufferedReader(
+                        InputStreamReader(conn.inputStream)
+                    )
+
                     val response = reader.readText()
                     reader.close()
 
                     val json = JSONObject(response)
-                    val totalSincronizados = json.optInt("total_sincronizados", 0)
-                    mainHandler.post { callback(true, totalSincronizados, null) }
+                    val itemsResponse = json.optJSONArray("items")
+
+                    val resultados = mutableListOf<ResultadoSincronizacion>()
+
+                    if (itemsResponse != null) {
+
+                        for (i in 0 until itemsResponse.length()) {
+
+                            val item = itemsResponse.getJSONObject(i)
+
+                            val localId = item.optLong("local_id", -1L)
+
+                            val remotoId = if (
+                                item.has("remoto_id") &&
+                                !item.isNull("remoto_id")
+                            ) {
+                                item.optInt("remoto_id")
+                            } else {
+                                null
+                            }
+
+                            val success = item.optBoolean(
+                                "success",
+                                false
+                            )
+
+                            val message = item.optString(
+                                "message",
+                                if (success) {
+                                    "Sincronizado correctamente"
+                                } else {
+                                    "No se pudo sincronizar"
+                                }
+                            )
+
+                            if (localId > 0) {
+                                resultados.add(
+                                    ResultadoSincronizacion(
+                                        localId = localId,
+                                        remotoId = remotoId,
+                                        success = success,
+                                        message = message
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    mainHandler.post {
+                        callback(
+                            true,
+                            resultados,
+                            null
+                        )
+                    }
+
                 } else {
-                    val reader = BufferedReader(InputStreamReader(conn.errorStream ?: conn.inputStream))
+
+                    val errorStream =
+                        conn.errorStream ?: conn.inputStream
+
+                    val reader = BufferedReader(
+                        InputStreamReader(errorStream)
+                    )
+
                     val errResp = reader.readText()
                     reader.close()
-                    mainHandler.post { callback(false, 0, "Error del servidor ($code): $errResp") }
+
+                    mainHandler.post {
+                        callback(
+                            false,
+                            emptyList(),
+                            "Error del servidor ($code): $errResp"
+                        )
+                    }
                 }
+
             } catch (e: Exception) {
-                mainHandler.post { callback(false, 0, "Fallo de conexión: ${e.localizedMessage}") }
+
+                mainHandler.post {
+                    callback(
+                        false,
+                        emptyList(),
+                        "Fallo de conexión: ${e.localizedMessage}"
+                    )
+                }
+
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    fun eliminarAsistenciaRemota(
+        remotoId: Int,
+        callback: (success: Boolean, error: String?) -> Unit
+    ) {
+        executor.execute {
+            var conn: HttpURLConnection? = null
+
+            try {
+                val url = URL("${getBaseUrl()}/api/asistencias/$remotoId")
+
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "DELETE"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                }
+
+                val code = conn.responseCode
+
+                if (code in 200..299 || code == 404) {
+                    mainHandler.post {
+                        callback(true, null)
+                    }
+                } else {
+                    val errorStream =
+                        conn.errorStream ?: conn.inputStream
+
+                    val reader = BufferedReader(
+                        InputStreamReader(errorStream)
+                    )
+
+                    val response = reader.readText()
+                    reader.close()
+
+                    mainHandler.post {
+                        callback(
+                            false,
+                            "Error del servidor ($code): $response"
+                        )
+                    }
+                }
+
+            } catch (e: Exception) {
+
+                mainHandler.post {
+                    callback(
+                        false,
+                        "Fallo de conexión: ${e.localizedMessage}"
+                    )
+                }
+
             } finally {
                 conn?.disconnect()
             }

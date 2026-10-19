@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/card_bg">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📋 Resumen de asistencia"
+        android:textColor="@color/white"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Estado actual de los alumnos"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp"
+        android:gravity="center"
+        android:layout_marginBottom="20dp"/>
+
+    <TextView
+        android:id="@+id/tvTotalResumen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Total de alumnos: 0"
+        android:textColor="@color/white"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:padding="14dp"
+        android:background="@color/bg_dark"
+        android:layout_marginBottom="18dp"/>
+
+    <TextView
+        android:id="@+id/tvPresentesResumen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="✓  Presentes: 0"
+        android:textColor="#4CAF50"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:padding="12dp"/>
+
+    <TextView
+        android:id="@+id/tvTardanzasResumen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="◷  Tardanzas: 0"
+        android:textColor="#FFB74D"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:padding="12dp"/>
+
+    <TextView
+        android:id="@+id/tvAusentesResumen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="✕  Ausentes: 0"
+        android:textColor="#EF5350"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:padding="12dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ASISTE+  |  Control de asistencia"
+        android:textColor="@color/text_secondary"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:layout_marginTop="20dp"/>
+
+</LinearLayout>

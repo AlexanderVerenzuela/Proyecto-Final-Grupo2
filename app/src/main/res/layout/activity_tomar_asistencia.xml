@@ -121,6 +121,27 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/tvTemporizadorSesion" />
 
+
+
+            <!-- Botón para mostrar resumen de asistencia -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnResumen"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginTop="8dp"
+                android:text="Ver resumen"
+                android:textSize="12sp"
+                android:textColor="@color/white"
+                app:cornerRadius="12dp"
+                app:strokeColor="@color/accent"
+                app:icon="@android:drawable/ic_menu_info_details"
+                app:iconTint="@color/accent"
+                app:iconPadding="6dp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/tvTemporizadorSesion" />
+
+
             <!-- Botón Rápido: Marcar Todos Presentes -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnMarcarTodosPresentes"

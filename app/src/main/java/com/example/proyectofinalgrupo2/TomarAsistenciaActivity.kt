@@ -136,6 +136,10 @@ class TomarAsistenciaActivity : AppCompatActivity() {
 
         binding.btnGuardarAsistencia.setOnClickListener {
             guardarAsistencias()
+
+        }
+        binding.btnResumen.setOnClickListener {
+            mostrarResumenAsistencia()
         }
 
         binding.btnCerrarSesion.setOnClickListener {
@@ -524,6 +528,65 @@ class TomarAsistenciaActivity : AppCompatActivity() {
             }
         }
     }
+
+
+    private fun mostrarResumenAsistencia() {
+
+        val filas = adapter.obtenerFilas()
+
+        if (filas.isEmpty()) {
+            android.widget.Toast.makeText(
+                this,
+                "No hay alumnos para mostrar",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val presentes = filas.count {
+            it.estado == "PRESENTE"
+        }
+
+        val tardanzas = filas.count {
+            it.estado == "TARDANZA"
+        }
+
+        val ausentes = filas.count {
+            it.estado == "AUSENTE"
+        }
+
+        val vista = layoutInflater.inflate(
+            R.layout.dialog_resumen_asistencia,
+            null
+        )
+
+        val tvTotal = vista.findViewById<
+                android.widget.TextView
+                >(R.id.tvTotalResumen)
+
+        val tvPresentes = vista.findViewById<
+                android.widget.TextView
+                >(R.id.tvPresentesResumen)
+
+        val tvTardanzas = vista.findViewById<
+                android.widget.TextView
+                >(R.id.tvTardanzasResumen)
+
+        val tvAusentes = vista.findViewById<
+                android.widget.TextView
+                >(R.id.tvAusentesResumen)
+
+        tvTotal.text = "Total de alumnos: ${filas.size}"
+        tvPresentes.text = "✓  Presentes: $presentes"
+        tvTardanzas.text = "◷  Tardanzas: $tardanzas"
+        tvAusentes.text = "✕  Ausentes: $ausentes"
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(vista)
+            .setPositiveButton("Aceptar", null)
+            .show()
+    }
+
 
     private fun guardarAsistencias() {
         val curso = cursoActual ?: return

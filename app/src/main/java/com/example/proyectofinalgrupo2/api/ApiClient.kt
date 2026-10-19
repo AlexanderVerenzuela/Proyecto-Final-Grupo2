@@ -7,6 +7,7 @@ import android.os.Looper
 import com.example.proyectofinalgrupo2.models.Alumno
 import com.example.proyectofinalgrupo2.models.Asistencia
 import com.example.proyectofinalgrupo2.models.Curso
+import com.example.proyectofinalgrupo2.models.SesionAsistencia
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -291,6 +292,9 @@ class ApiClient private constructor(private val context: Context) {
                         put("fecha", a.fecha)
                         put("estado", a.estado.uppercase())
                         put("observacion", a.observacion)
+                        put("fecha_registro", a.fechaRegistro)
+                        put("sesion_id", a.sesionId)
+                        put("remoto_id", a.remotoId ?: JSONObject.NULL)
                     }
 
                     itemsArray.put(item)
@@ -422,6 +426,244 @@ class ApiClient private constructor(private val context: Context) {
             }
         }
     }
+
+    // ================================================================
+    // 6. SESIONES DE ASISTENCIA
+    // ================================================================
+
+    private fun parseSesion(obj: JSONObject): SesionAsistencia {
+        return SesionAsistencia(
+            id = obj.getInt("id"),
+            cursoId = obj.getInt("curso_id"),
+            fecha = obj.optString("fecha", ""),
+            nombre = obj.optString("nombre", "Clase"),
+            inicioAt = obj.optString("inicio_at", ""),
+            finAt = obj.optString("fin_at", ""),
+            estado = obj.optString("estado", "CERRADA"),
+            segundosRestantes = obj.optInt("segundos_restantes", 0)
+        )
+    }
+
+    // GET /api/sesiones/actual?curso_id=3&fecha=2026-10-18
+    fun getSesionesActuales(
+        cursoId: Int,
+        fecha: String,
+        callback: (success: Boolean, sesiones: List<SesionAsistencia>, error: String?) -> Unit
+    ) {
+        executor.execute {
+            var conn: HttpURLConnection? = null
+
+            try {
+                val url = URL(
+                    "${getBaseUrl()}/api/sesiones/actual" +
+                            "?curso_id=$cursoId&fecha=$fecha"
+                )
+
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream
+                }
+
+                val response = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code in 200..299) {
+                    val json = JSONObject(response)
+                    val array = json.optJSONArray("data") ?: JSONArray()
+                    val sesiones = mutableListOf<SesionAsistencia>()
+
+                    for (i in 0 until array.length()) {
+                        sesiones.add(parseSesion(array.getJSONObject(i)))
+                    }
+
+                    mainHandler.post {
+                        callback(true, sesiones, null)
+                    }
+                } else {
+                    mainHandler.post {
+                        callback(false, emptyList(), "Error HTTP $code: $response")
+                    }
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    callback(false, emptyList(), "Error de conexión: ${e.localizedMessage}")
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    // GET /api/sesiones/:id
+    fun getSesion(
+        sesionId: Int,
+        callback: (success: Boolean, sesion: SesionAsistencia?, error: String?) -> Unit
+    ) {
+        executor.execute {
+            var conn: HttpURLConnection? = null
+
+            try {
+                val url = URL("${getBaseUrl()}/api/sesiones/$sesionId")
+
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream
+                }
+
+                val response = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code in 200..299) {
+                    val json = JSONObject(response)
+                    val sesion = parseSesion(json.getJSONObject("data"))
+
+                    mainHandler.post {
+                        callback(true, sesion, null)
+                    }
+                } else {
+                    mainHandler.post {
+                        callback(false, null, "Error HTTP $code: $response")
+                    }
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    callback(false, null, "Error de conexión: ${e.localizedMessage}")
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    // POST /api/sesiones
+    fun crearSesion(
+        cursoId: Int,
+        fecha: String,
+        nombre: String,
+        callback: (success: Boolean, sesion: SesionAsistencia?, error: String?) -> Unit
+    ) {
+        executor.execute {
+            var conn: HttpURLConnection? = null
+
+            try {
+                val url = URL("${getBaseUrl()}/api/sesiones")
+
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    doOutput = true
+                    setRequestProperty(
+                        "Content-Type",
+                        "application/json; charset=UTF-8"
+                    )
+                }
+
+                val payload = JSONObject().apply {
+                    put("curso_id", cursoId)
+                    put("fecha", fecha)
+                    put("nombre", nombre)
+                }
+
+                OutputStreamWriter(conn.outputStream, "UTF-8").use {
+                    it.write(payload.toString())
+                }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream
+                }
+
+                val response = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code in 200..299) {
+                    val json = JSONObject(response)
+                    val sesion = parseSesion(json.getJSONObject("data"))
+
+                    mainHandler.post {
+                        callback(true, sesion, null)
+                    }
+                } else {
+                    mainHandler.post {
+                        callback(false, null, "Error HTTP $code: $response")
+                    }
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    callback(false, null, "Error de conexión: ${e.localizedMessage}")
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
+    // POST /api/sesiones/:id/cerrar
+    fun cerrarSesion(
+        sesionId: Int,
+        callback: (success: Boolean, error: String?) -> Unit
+    ) {
+        executor.execute {
+            var conn: HttpURLConnection? = null
+
+            try {
+                val url = URL(
+                    "${getBaseUrl()}/api/sesiones/$sesionId/cerrar"
+                )
+
+                conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    doOutput = true
+                }
+
+                conn.outputStream.use { it.flush() }
+
+                val code = conn.responseCode
+                val stream = if (code in 200..299) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream
+                }
+
+                val response = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (code in 200..299) {
+                    mainHandler.post {
+                        callback(true, null)
+                    }
+                } else {
+                    mainHandler.post {
+                        callback(false, "Error HTTP $code: $response")
+                    }
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    callback(false, "Error de conexión: ${e.localizedMessage}")
+                }
+            } finally {
+                conn?.disconnect()
+            }
+        }
+    }
+
 }
 
 data class SyncResponseResult(

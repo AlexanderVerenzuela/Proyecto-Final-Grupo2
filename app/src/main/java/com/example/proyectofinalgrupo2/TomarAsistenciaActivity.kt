@@ -17,6 +17,16 @@ import com.example.proyectofinalgrupo2.models.Curso
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import android.widget.EditText
+import com.example.proyectofinalgrupo2.models.SesionAsistencia
+import android.os.Handler
+import android.os.Looper
+import java.util.Date
+import java.util.TimeZone
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import org.json.JSONObject
 
 class TomarAsistenciaActivity : AppCompatActivity() {
 
@@ -27,6 +37,14 @@ class TomarAsistenciaActivity : AppCompatActivity() {
 
     private var cursoActual: Curso? = null
     private var fechaSeleccionada: String = ""
+
+    private var sesionActual: SesionAsistencia? = null
+
+    private val temporizadorHandler = Handler(Looper.getMainLooper())
+    private var temporizadorRunnable: Runnable? = null
+    private var finSesionMillis: Long = 0L
+    private var sesionExpirada = false
+    private var verificacionSesionRunnable: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +70,7 @@ class TomarAsistenciaActivity : AppCompatActivity() {
         configurarBotones()
 
         cargarAlumnos()
+        cargarSesiones()
     }
 
     private fun configurarToolbar() {
@@ -82,6 +101,14 @@ class TomarAsistenciaActivity : AppCompatActivity() {
                 calendar.set(year, monthOfYear, dayOfMonth)
                 fechaSeleccionada = sdf.format(calendar.time)
                 binding.tvFechaSeleccionada.text = fechaSeleccionada
+
+                detenerTemporizador()
+                sesionActual = null
+                binding.tvTemporizadorSesion.text = "Sesión: sin seleccionar"
+                binding.btnMarcarTodosPresentes.isEnabled = false
+                binding.btnGuardarAsistencia.isEnabled = false
+
+                cargarSesiones()
             }, y, m, d)
             dpd.show()
         }
@@ -93,15 +120,384 @@ class TomarAsistenciaActivity : AppCompatActivity() {
         binding.rvAlumnosAsistencia.adapter = adapter
     }
 
+
     private fun configurarBotones() {
+        binding.btnMarcarTodosPresentes.isEnabled = false
+        binding.btnGuardarAsistencia.isEnabled = false
+
         binding.btnMarcarTodosPresentes.setOnClickListener {
             adapter.marcarTodos("PRESENTE")
-            Toast.makeText(this, "Todos los alumnos marcados como PRESENTE", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                this,
+                "Todos los alumnos marcados como PRESENTE",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         binding.btnGuardarAsistencia.setOnClickListener {
             guardarAsistencias()
         }
+
+        binding.btnCerrarSesion.setOnClickListener {
+
+            if (!hayConexion()) {
+                Toast.makeText(
+                    this,
+                    "Necesitas conexión a internet para cerrar la sesión.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+
+            val sesion = sesionActual
+
+            if (sesion == null) {
+                Toast.makeText(
+                    this,
+                    "No hay una sesión activa para cerrar.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            AlertDialog.Builder(this)
+                .setTitle("Cerrar sesión")
+                .setMessage(
+                    "¿Estás seguro de que deseas cerrar la sesión \"${sesion.nombre}\"?\n\n" +
+                            "Esta acción finalizará la sesión inmediatamente. " +
+                            "No se podrán registrar nuevas asistencias ni modificar " +
+                            "las existentes después del cierre."
+                )
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Cerrar sesión") { _, _ ->
+                    binding.btnCerrarSesion.isEnabled = false
+                    binding.progressBarTomar.visibility = View.VISIBLE
+
+                    apiClient.cerrarSesion(sesion.id) { success, error ->
+                        binding.progressBarTomar.visibility = View.GONE
+
+                        if (success) {
+                            detenerTemporizador()
+                            sesionActual = null
+                            sesionExpirada = true
+
+                            binding.tvTemporizadorSesion.text = "Sesión cerrada"
+                            bloquearControlesSesion()
+                            binding.btnCerrarSesion.visibility = View.GONE
+
+                            Toast.makeText(
+                                this,
+                                "La sesión se cerró correctamente.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            binding.btnCerrarSesion.isEnabled = true
+
+                            AlertDialog.Builder(this)
+                                .setTitle("No se pudo cerrar la sesión")
+                                .setMessage(error ?: "Error desconocido")
+                                .setPositiveButton("Entendido", null)
+                                .show()
+                        }
+                    }
+                }
+                .show()
+        }
+    }
+    private fun hayConexion(): Boolean {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE)
+                as ConnectivityManager
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+
+        return capabilities.hasCapability(
+            NetworkCapabilities.NET_CAPABILITY_INTERNET
+        ) && capabilities.hasCapability(
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED
+        )
+    }
+
+    private fun guardarSesionEnCache(sesion: SesionAsistencia) {
+        val preferencias = getSharedPreferences(
+            "sesion_asistencia_cache",
+            Context.MODE_PRIVATE
+        )
+
+        val datos = JSONObject().apply {
+            put("id", sesion.id)
+            put("cursoId", sesion.cursoId)
+            put("fecha", sesion.fecha)
+            put("nombre", sesion.nombre)
+            put("inicioAt", sesion.inicioAt)
+            put("finAt", sesion.finAt)
+            put("estado", sesion.estado)
+            put("segundosRestantes", sesion.segundosRestantes)
+            put("guardadaEn", System.currentTimeMillis())
+        }
+
+        preferencias.edit()
+            .putString("${sesion.cursoId}_$fechaSeleccionada", datos.toString())
+            .apply()
+    }
+
+    private fun recuperarSesionDeCache(
+        cursoId: Int
+    ): SesionAsistencia? {
+        val preferencias = getSharedPreferences(
+            "sesion_asistencia_cache",
+            Context.MODE_PRIVATE
+        )
+
+        val clave = "${cursoId}_$fechaSeleccionada"
+        val texto = preferencias.getString(clave, null) ?: return null
+
+        return try {
+            val datos = JSONObject(texto)
+
+            val segundosGuardados = datos.optInt("segundosRestantes", 0)
+            val guardadaEn = datos.optLong("guardadaEn", 0L)
+            val transcurridos = (
+                    (System.currentTimeMillis() - guardadaEn) / 1000L
+                    ).coerceAtLeast(0L)
+
+            val restantes = (segundosGuardados - transcurridos)
+                .coerceAtLeast(0L)
+                .toInt()
+
+            val estado = datos.optString("estado", "CERRADA")
+
+            if (
+                !estado.equals("ABIERTA", ignoreCase = true) ||
+                restantes <= 0
+            ) {
+                return null
+            }
+
+            SesionAsistencia(
+                id = datos.getInt("id"),
+                cursoId = datos.getInt("cursoId"),
+                fecha = datos.optString("fecha", ""),
+                nombre = datos.optString("nombre", "Clase"),
+                inicioAt = datos.optString("inicioAt", ""),
+                finAt = datos.optString("finAt", ""),
+                estado = estado,
+                segundosRestantes = restantes
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+    private fun cargarSesiones() {
+        val curso = cursoActual ?: return
+
+        binding.progressBarTomar.visibility = View.VISIBLE
+        binding.btnMarcarTodosPresentes.isEnabled = false
+        binding.btnGuardarAsistencia.isEnabled = false
+
+        apiClient.getSesionesActuales(curso.id, fechaSeleccionada) {
+                success, sesiones, error ->
+
+            binding.progressBarTomar.visibility = View.GONE
+
+            if (!success) {
+                val sesionGuardada = recuperarSesionDeCache(curso.id)
+
+                if (sesionGuardada != null) {
+                    seleccionarSesion(sesionGuardada)
+
+                    Toast.makeText(
+                        this,
+                        "Sin conexión: se recuperó la sesión guardada. " +
+                                "Las asistencias quedarán pendientes de sincronización.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    detenerTemporizador()
+                    sesionActual = null
+                    binding.tvTemporizadorSesion.text =
+                        "Sin conexión y sin sesión disponible"
+                    bloquearControlesSesion()
+
+                    AlertDialog.Builder(this)
+                        .setTitle("No se pudo comprobar la sesión")
+                        .setMessage(
+                            "No hay conexión y no existe una sesión guardada " +
+                                    "que siga dentro del tiempo permitido. " +
+                                    "Conéctate para consultar o iniciar una sesión."
+                        )
+                        .setPositiveButton("Reintentar") { _, _ ->
+                            cargarSesiones()
+                        }
+                        .setNegativeButton("Cancelar", null)
+                        .show()
+                }
+
+                return@getSesionesActuales
+            }
+
+            val sesionesActivas = sesiones.filter {
+                it.estado.equals("ABIERTA", ignoreCase = true) &&
+                        it.segundosRestantes > 0
+            }
+
+            if (sesionesActivas.isNotEmpty()) {
+                val sesion = sesionesActivas.maxByOrNull { it.inicioAt }
+                if (sesion != null) {
+                    seleccionarSesion(sesion)
+                }
+            } else {
+                crearSesionAutomatica(curso.id, sesiones.size + 1)
+            }
+        }
+    }
+
+    private fun crearSesionAutomatica(cursoId: Int, numeroSesion: Int) {
+        binding.progressBarTomar.visibility = View.VISIBLE
+        binding.btnMarcarTodosPresentes.isEnabled = false
+        binding.btnGuardarAsistencia.isEnabled = false
+
+        val nombreSesion = "Clase $numeroSesion"
+
+        apiClient.crearSesion(
+            cursoId = cursoId,
+            fecha = fechaSeleccionada,
+            nombre = nombreSesion
+        ) { success, sesion, error ->
+            binding.progressBarTomar.visibility = View.GONE
+
+            if (success && sesion != null) {
+                seleccionarSesion(sesion)
+                Toast.makeText(
+                    this,
+                    "Se inició automáticamente la sesión $nombreSesion",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                detenerTemporizador()
+                sesionActual = null
+                binding.tvTemporizadorSesion.text = "No se pudo crear la sesión"
+                binding.btnMarcarTodosPresentes.isEnabled = false
+                binding.btnGuardarAsistencia.isEnabled = false
+
+                AlertDialog.Builder(this)
+                    .setTitle("No se pudo iniciar la clase")
+                    .setMessage(
+                        "La aplicación no pudo crear la sesión automáticamente. " +
+                                "Comprueba la conexión e inténtalo de nuevo.\n\n" +
+                                (error ?: "Error desconocido")
+                    )
+                    .setPositiveButton("Reintentar") { _, _ -> cargarSesiones() }
+                    .setNegativeButton("Cancelar", null)
+                    .setCancelable(true)
+                    .show()
+            }
+        }
+    }
+
+    private fun seleccionarSesion(sesion: SesionAsistencia) {
+        if (!sesion.estado.equals("ABIERTA", ignoreCase = true) ||
+            sesion.segundosRestantes <= 0
+        ) {
+            detenerTemporizador()
+            sesionActual = null
+            binding.tvTemporizadorSesion.text = "Sesión: sin seleccionar"
+            binding.btnMarcarTodosPresentes.isEnabled = false
+            binding.btnGuardarAsistencia.isEnabled = false
+            binding.btnCerrarSesion.visibility = View.GONE
+
+            Toast.makeText(
+                this,
+                "Esta sesión ya no está activa. Selecciona otra.",
+                Toast.LENGTH_LONG
+            ).show()
+
+            cargarSesiones()
+            return
+        }
+
+        sesionActual = sesion
+        guardarSesionEnCache(sesion)
+        iniciarTemporizador(sesion)
+
+        binding.btnMarcarTodosPresentes.isEnabled = true
+        binding.btnGuardarAsistencia.isEnabled = true
+        binding.btnCerrarSesion.visibility = View.VISIBLE
+        binding.btnCerrarSesion.isEnabled = true
+
+        Toast.makeText(
+            this,
+            "Sesión seleccionada: ${sesion.nombre}",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun mostrarDialogoCrearSesion() {
+        val entradaNombre = EditText(this).apply {
+            hint = "Ej.: Clase, Recuperación, Laboratorio"
+            setSingleLine(true)
+            setText("Clase")
+            setSelection(text.length)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Crear sesión")
+            .setMessage(
+                "La sesión tendrá una duración de tres horas desde su creación."
+            )
+            .setView(entradaNombre)
+            .setPositiveButton("Crear") { _, _ ->
+                val curso = cursoActual ?: return@setPositiveButton
+                val nombre = entradaNombre.text.toString().trim()
+
+                if (nombre.isBlank()) {
+                    Toast.makeText(
+                        this,
+                        "Escribe un nombre para la sesión.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@setPositiveButton
+                }
+
+                binding.btnMarcarTodosPresentes.isEnabled = false
+                binding.btnGuardarAsistencia.isEnabled = false
+                binding.progressBarTomar.visibility = View.VISIBLE
+
+                apiClient.crearSesion(
+                    cursoId = curso.id,
+                    fecha = fechaSeleccionada,
+                    nombre = nombre
+                ) { success, sesion, error ->
+
+                    binding.progressBarTomar.visibility = View.GONE
+
+                    if (success && sesion != null) {
+                        seleccionarSesion(sesion)
+                    } else {
+                        detenerTemporizador()
+                        sesionActual = null
+                        binding.tvTemporizadorSesion.text = "Sesión: sin seleccionar"
+
+                        Toast.makeText(
+                            this,
+                            "No se pudo crear la sesión: " +
+                                    (error ?: "Error desconocido"),
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                        cargarSesiones()
+                    }
+                }
+            }
+            .setNegativeButton("Cancelar") { _, _ ->
+                detenerTemporizador()
+                sesionActual = null
+                binding.tvTemporizadorSesion.text = "Sesión: sin seleccionar"
+                binding.btnMarcarTodosPresentes.isEnabled = false
+                binding.btnGuardarAsistencia.isEnabled = false
+                binding.btnCerrarSesion.visibility = View.GONE
+            }
+            .setCancelable(false)
+            .show()
     }
 
     private fun cargarAlumnos() {
@@ -131,6 +527,36 @@ class TomarAsistenciaActivity : AppCompatActivity() {
 
     private fun guardarAsistencias() {
         val curso = cursoActual ?: return
+        val sesion = sesionActual
+
+
+        if (sesionExpirada) {
+            bloquearControlesSesion()
+
+            Toast.makeText(
+                this,
+                "La sesión ha expirado. Selecciona o crea otra sesión.",
+                Toast.LENGTH_LONG
+            ).show()
+
+            cargarSesiones()
+            return
+        }
+
+        if (sesion == null ||
+            !sesion.estado.equals("ABIERTA", ignoreCase = true) ||
+            sesion.segundosRestantes <= 0
+        ) {
+            Toast.makeText(
+                this,
+                "Selecciona una sesión activa antes de guardar.",
+                Toast.LENGTH_LONG
+            ).show()
+
+            cargarSesiones()
+            return
+        }
+
         val filas = adapter.obtenerFilas()
 
         if (filas.isEmpty()) {
@@ -145,7 +571,16 @@ class TomarAsistenciaActivity : AppCompatActivity() {
         var guardadosLocalCount = 0
 
         // 1. Guardar primero en SQLite local garantizando que no se pierdan datos
+        val formatoFechaRegistro = SimpleDateFormat(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            Locale.US
+        ).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+
         for (f in filas) {
+            val fechaRegistro = formatoFechaRegistro.format(Date())
+
             val asistencia = Asistencia(
                 id = 0,
                 alumnoId = f.alumno.id,
@@ -155,15 +590,20 @@ class TomarAsistenciaActivity : AppCompatActivity() {
                 cursoCodigo = curso.codigo,
                 cursoNombre = curso.nombre,
                 fecha = fechaSeleccionada,
+                sesionId = sesion.id,
                 estado = f.estado,
                 observacion = f.observacion.trim(),
-                sincronizado = false
+                sincronizado = false,
+                fechaRegistro = fechaRegistro
             )
 
             val localId = dbHelper.insertarAsistencia(asistencia)
+
             if (localId > 0) {
                 guardadosLocalCount++
-                asistenciasParaGuardar.add(asistencia.copy(id = localId))
+                asistenciasParaGuardar.add(
+                    asistencia.copy(id = localId)
+                )
             }
         }
 
@@ -223,14 +663,23 @@ class TomarAsistenciaActivity : AppCompatActivity() {
                             .show()
                     }
 
+
                     else -> {
+                        val motivos = fallidos
+                            .take(3)
+                            .joinToString("\n") { resultado ->
+                                "• ${resultado.message}"
+                            }
 
                         AlertDialog.Builder(this)
                             .setTitle("Guardado Localmente")
                             .setMessage(
-                                "Las $guardadosLocalCount asistencias se guardaron correctamente en SQLite, " +
-                                        "pero ninguna pudo sincronizarse con el servidor.\n\n" +
-                                        "Quedarán pendientes para una próxima sincronización."
+                                "Las $guardadosLocalCount asistencias se guardaron " +
+                                        "en SQLite, pero ninguna pudo sincronizarse.\n\n" +
+                                        "Motivos informados por el servidor:\n" +
+                                        (motivos.ifBlank {
+                                            "El servidor no proporcionó detalles."
+                                        })
                             )
                             .setCancelable(false)
                             .setPositiveButton("Entendido") { _, _ ->
@@ -256,5 +705,141 @@ class TomarAsistenciaActivity : AppCompatActivity() {
                     .show()
             }
         }
+    }
+
+    private fun iniciarTemporizador(sesion: SesionAsistencia) {
+        detenerTemporizador()
+
+        finSesionMillis = System.currentTimeMillis() +
+                (sesion.segundosRestantes.coerceAtLeast(0) * 1000L)
+
+        sesionExpirada = false
+        actualizarTemporizador()
+        programarVerificacionSesion(sesion.id)
+    }
+
+    private fun detenerTemporizador() {
+        temporizadorRunnable?.let {
+            temporizadorHandler.removeCallbacks(it)
+        }
+        temporizadorRunnable = null
+
+        verificacionSesionRunnable?.let {
+            temporizadorHandler.removeCallbacks(it)
+        }
+        verificacionSesionRunnable = null
+    }
+
+    private fun bloquearControlesSesion() {
+        binding.btnMarcarTodosPresentes.isEnabled = false
+        binding.btnGuardarAsistencia.isEnabled = false
+        binding.btnCerrarSesion.visibility = View.GONE
+    }
+
+    private fun programarVerificacionSesion(sesionId: Int) {
+        verificacionSesionRunnable?.let {
+            temporizadorHandler.removeCallbacks(it)
+        }
+
+        verificacionSesionRunnable = Runnable {
+            if (sesionActual?.id != sesionId) {
+                return@Runnable
+            }
+
+            apiClient.getSesion(sesionId) { success, sesionServidor, _ ->
+                if (sesionActual?.id != sesionId) {
+                    return@getSesion
+                }
+
+                if (!success || sesionServidor == null) {
+                    // Si el servidor no responde, vuelve a comprobarlo en 15 segundos.
+                    programarVerificacionSesion(sesionId)
+                    return@getSesion
+                }
+
+                val sigueActiva =
+                    sesionServidor.estado.equals("ABIERTA", ignoreCase = true) &&
+                            sesionServidor.segundosRestantes > 0
+
+
+                if (!sigueActiva) {
+                    detenerTemporizador()
+                    sesionActual = null
+                    sesionExpirada = true
+
+                    binding.tvTemporizadorSesion.text = "Sesión cerrada o expirada"
+                    bloquearControlesSesion()
+
+                    Toast.makeText(
+                        this@TomarAsistenciaActivity,
+                        "La sesión ya no está activa. Selecciona otra sesión.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@getSesion
+                }
+
+                // Sincroniza el contador local con el tiempo que informa el servidor.
+                finSesionMillis = System.currentTimeMillis() +
+                        (sesionServidor.segundosRestantes * 1000L)
+                sesionActual = sesionServidor
+                programarVerificacionSesion(sesionId)
+            }
+        }
+
+        temporizadorHandler.postDelayed(verificacionSesionRunnable!!, 15_000L)
+    }
+
+    private fun actualizarTemporizador() {
+        val restanteMillis = (finSesionMillis - System.currentTimeMillis())
+            .coerceAtLeast(0L)
+
+        val segundos = restanteMillis / 1000L
+        val horas = segundos / 3600L
+        val minutos = (segundos % 3600L) / 60L
+        val segundosFinales = segundos % 60L
+
+        val sesion = sesionActual
+
+        if (sesion == null) {
+            binding.tvTemporizadorSesion.text = "Sesión: sin seleccionar"
+            return
+        }
+
+        binding.tvTemporizadorSesion.text = String.format(
+            Locale.getDefault(),
+            "Sesión: %s | Tiempo restante: %02d:%02d:%02d",
+            sesion.nombre,
+            horas,
+            minutos,
+            segundosFinales
+        )
+
+        if (restanteMillis <= 0L) {
+            detenerTemporizador()
+            sesionExpirada = true
+            sesionActual = null
+
+            binding.tvTemporizadorSesion.text = "Sesión expirada"
+            bloquearControlesSesion()
+
+            Toast.makeText(
+                this,
+                "La sesión ha expirado. Selecciona o crea otra sesión.",
+                Toast.LENGTH_LONG
+            ).show()
+
+            return
+        }
+
+        temporizadorRunnable = Runnable {
+            actualizarTemporizador()
+        }
+
+        temporizadorHandler.postDelayed(temporizadorRunnable!!, 1000L)
+    }
+
+    override fun onDestroy() {
+        detenerTemporizador()
+        super.onDestroy()
     }
 }

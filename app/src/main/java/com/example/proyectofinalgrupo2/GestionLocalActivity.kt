@@ -108,45 +108,124 @@ class GestionLocalActivity : AppCompatActivity() {
     // =================================================================
     // OPERACIÓN SQLITE: MODIFICAR REGISTRO (UPDATE)
     // =================================================================
+
     private fun mostrarDialogoEditar(asistencia: Asistencia) {
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_editar_asistencia, null)
-        val rgEstado = view.findViewById<RadioGroup>(R.id.rgDialogEstado)
-        val rbPresente = view.findViewById<RadioButton>(R.id.rbDialogPresente)
-        val rbTardanza = view.findViewById<RadioButton>(R.id.rbDialogTardanza)
-        val rbAusente = view.findViewById<RadioButton>(R.id.rbDialogAusente)
-        val etObs = view.findViewById<EditText>(R.id.etDialogObs)
+        val sesionId = asistencia.sesionId
 
-        when (asistencia.estado.uppercase()) {
-            "PRESENTE" -> rbPresente.isChecked = true
-            "TARDANZA" -> rbTardanza.isChecked = true
-            "AUSENTE" -> rbAusente.isChecked = true
+        if (sesionId == null) {
+            Toast.makeText(
+                this,
+                "No se puede verificar la sesión. No se modificó el registro.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
         }
-        etObs.setText(asistencia.observacion)
 
-        AlertDialog.Builder(this)
-            .setTitle("Modificar Asistencia #${asistencia.id}")
-            .setMessage("Estudiante: ${asistencia.alumnoNombre}\nFecha: ${asistencia.fecha}")
-            .setView(view)
-            .setPositiveButton("Actualizar") { _, _ ->
-                val nuevoEstado = when (rgEstado.checkedRadioButtonId) {
-                    R.id.rbDialogPresente -> "PRESENTE"
-                    R.id.rbDialogTardanza -> "TARDANZA"
-                    R.id.rbDialogAusente -> "AUSENTE"
-                    else -> "PRESENTE"
-                }
-                val nuevaObs = etObs.text.toString().trim()
+        binding.progressBarLocal.visibility = View.VISIBLE
 
-                // Actualizar directamente en SQLite
-                val rowsAffected = dbHelper.actualizarAsistencia(asistencia.id, nuevoEstado, nuevaObs)
-                if (rowsAffected > 0) {
-                    Toast.makeText(this, "Registro actualizado en SQLite", Toast.LENGTH_SHORT).show()
-                    cargarRegistrosLocales()
-                } else {
-                    Toast.makeText(this, "Error al actualizar en SQLite", Toast.LENGTH_SHORT).show()
+        apiClient.getSesion(sesionId) { success, sesion, error ->
+            runOnUiThread {
+                binding.progressBarLocal.visibility = View.GONE
+
+                if (!success || sesion == null) {
+                    Toast.makeText(
+                        this,
+                        "No se pudo verificar la sesión. El registro no se modificó.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@runOnUiThread
                 }
+
+                if (sesion.estado.uppercase() != "ABIERTA" ||
+                    sesion.segundosRestantes <= 0
+                ) {
+                    Toast.makeText(
+                        this,
+                        "La sesión está cerrada o vencida. No se puede modificar la asistencia.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@runOnUiThread
+                }
+
+                val view = LayoutInflater.from(this)
+                    .inflate(R.layout.dialog_editar_asistencia, null)
+
+                val rgEstado = view.findViewById<RadioGroup>(R.id.rgDialogEstado)
+                val rbPresente = view.findViewById<RadioButton>(R.id.rbDialogPresente)
+                val rbTardanza = view.findViewById<RadioButton>(R.id.rbDialogTardanza)
+                val rbAusente = view.findViewById<RadioButton>(R.id.rbDialogAusente)
+                val etObs = view.findViewById<EditText>(R.id.etDialogObs)
+
+                when (asistencia.estado.uppercase()) {
+                    "PRESENTE" -> rbPresente.isChecked = true
+                    "TARDANZA" -> rbTardanza.isChecked = true
+                    "AUSENTE" -> rbAusente.isChecked = true
+                }
+
+                etObs.setText(asistencia.observacion)
+
+                AlertDialog.Builder(this)
+                    .setTitle("Modificar Asistencia #${asistencia.id}")
+                    .setMessage(
+                        "Estudiante: ${asistencia.alumnoNombre}\nFecha: ${asistencia.fecha}"
+                    )
+                    .setView(view)
+                    .setPositiveButton("Actualizar") { _, _ ->
+                        val nuevoEstado = when (rgEstado.checkedRadioButtonId) {
+                            R.id.rbDialogPresente -> "PRESENTE"
+                            R.id.rbDialogTardanza -> "TARDANZA"
+                            R.id.rbDialogAusente -> "AUSENTE"
+                            else -> "PRESENTE"
+                        }
+
+                        val nuevaObs = etObs.text.toString().trim()
+
+                        // Verificar nuevamente justo antes de guardar.
+                        binding.progressBarLocal.visibility = View.VISIBLE
+
+                        apiClient.getSesion(sesionId) { successActual, sesionActual, errorActual ->
+                            runOnUiThread {
+                                binding.progressBarLocal.visibility = View.GONE
+
+                                if (!successActual || sesionActual == null ||
+                                    sesionActual.estado.uppercase() != "ABIERTA" ||
+                                    sesionActual.segundosRestantes <= 0
+                                ) {
+                                    Toast.makeText(
+                                        this,
+                                        "No se modificó: la sesión está cerrada, vencida o no se pudo verificar.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    return@runOnUiThread
+                                }
+
+                                val rowsAffected = dbHelper.actualizarAsistencia(
+                                    asistencia.id,
+                                    nuevoEstado,
+                                    nuevaObs
+                                )
+
+                                if (rowsAffected > 0) {
+                                    Toast.makeText(
+                                        this,
+                                        "Registro actualizado en SQLite",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    cargarRegistrosLocales()
+                                } else {
+                                    Toast.makeText(
+                                        this,
+                                        "Error al actualizar en SQLite",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
             }
-            .setNegativeButton("Cancelar", null)
-            .show()
+        }
     }
 
     // =================================================================
@@ -291,11 +370,20 @@ class GestionLocalActivity : AppCompatActivity() {
                     }
 
                     else -> {
+                        val motivos = fallidos
+                            .map { it.message }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .joinToString("\n\n")
+
                         AlertDialog.Builder(this)
                             .setTitle("Sincronización no realizada")
                             .setMessage(
                                 "Ningún registro pudo sincronizarse.\n\n" +
-                                        "Los registros siguen guardados localmente."
+                                        (motivos.ifBlank {
+                                            "El servidor no indicó el motivo del rechazo."
+                                        }) +
+                                        "\n\nLos registros siguen guardados localmente en SQLite."
                             )
                             .setPositiveButton("Entendido", null)
                             .show()

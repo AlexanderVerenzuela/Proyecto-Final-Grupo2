@@ -13,7 +13,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
 
     companion object {
         const val DATABASE_NAME = "asiste_plus_local.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         // Tabla Asistencias
         const val TABLE_ASISTENCIAS = "asistencias"
@@ -27,6 +27,8 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         const val COL_ASIST_CURSO_NOM = "curso_nombre"
         const val COL_ASIST_FECHA = "fecha"
         const val COL_ASIST_ESTADO = "estado"
+
+        const val COL_ASIST_SESION_ID = "sesion_id"
         const val COL_ASIST_OBS = "observacion"
         const val COL_ASIST_SINCRONIZADO = "sincronizado"
         const val COL_ASIST_FECHA_REG = "fecha_registro"
@@ -91,11 +93,12 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
                 $COL_ASIST_CURSO_COD TEXT,
                 $COL_ASIST_CURSO_NOM TEXT NOT NULL,
                 $COL_ASIST_FECHA TEXT NOT NULL,
+                $COL_ASIST_SESION_ID INTEGER,
                 $COL_ASIST_ESTADO TEXT NOT NULL,
                 $COL_ASIST_OBS TEXT,
                 $COL_ASIST_SINCRONIZADO INTEGER DEFAULT 0,
                 $COL_ASIST_FECHA_REG TEXT DEFAULT (datetime('now', 'localtime')),
-                UNIQUE($COL_ASIST_ALUMNO_ID, $COL_ASIST_CURSO_ID, $COL_ASIST_FECHA)
+                UNIQUE($COL_ASIST_ALUMNO_ID, $COL_ASIST_SESION_ID)
             );
         """.trimIndent()
         db.execSQL(createAsistencias)
@@ -104,12 +107,108 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         insertarDatosIniciales(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_ASISTENCIAS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_CURSOS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_ALUMNOS")
-        onCreate(db)
+
+    override fun onUpgrade(
+        db: SQLiteDatabase,
+        oldVersion: Int,
+        newVersion: Int
+    ) {
+        if (oldVersion < 2) {
+            val tabla = TABLE_ASISTENCIAS
+            val tablaNueva = "${TABLE_ASISTENCIAS}_nueva"
+
+            db.beginTransaction()
+            try {
+                // Comprobar si la base anterior ya tenía sesion_id.
+                var tieneSesionId = false
+                db.rawQuery("PRAGMA table_info($tabla)", null).use { cursor ->
+                    val nombreIdx = cursor.getColumnIndexOrThrow("name")
+                    while (cursor.moveToNext()) {
+                        if (cursor.getString(nombreIdx) == COL_ASIST_SESION_ID) {
+                            tieneSesionId = true
+                            break
+                        }
+                    }
+                }
+
+                // No sobrescribir una tabla temporal si quedó de una
+                // ejecución anterior interrumpida.
+                db.execSQL("DROP TABLE IF EXISTS $tablaNueva")
+
+                db.execSQL("""
+                    CREATE TABLE $tablaNueva (
+                        $COL_ASIST_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        $COL_ASIST_REMOTO_ID INTEGER,
+                        $COL_ASIST_ALUMNO_ID INTEGER NOT NULL,
+                        $COL_ASIST_ALUMNO_COD TEXT,
+                        $COL_ASIST_ALUMNO_NOM TEXT NOT NULL,
+                        $COL_ASIST_CURSO_ID INTEGER NOT NULL,
+                        $COL_ASIST_CURSO_COD TEXT,
+                        $COL_ASIST_CURSO_NOM TEXT NOT NULL,
+                        $COL_ASIST_FECHA TEXT NOT NULL,
+                        $COL_ASIST_SESION_ID INTEGER,
+                        $COL_ASIST_ESTADO TEXT NOT NULL,
+                        $COL_ASIST_OBS TEXT,
+                        $COL_ASIST_SINCRONIZADO INTEGER DEFAULT 0,
+                        $COL_ASIST_FECHA_REG TEXT DEFAULT
+                            (datetime('now', 'localtime')),
+                        UNIQUE($COL_ASIST_ALUMNO_ID, $COL_ASIST_SESION_ID)
+                    )
+                """.trimIndent())
+
+                val expresionSesion = if (tieneSesionId) {
+                    COL_ASIST_SESION_ID
+                } else {
+                    "NULL"
+                }
+
+                // Copiar todas las asistencias, incluidos sus IDs,
+                // estados, observaciones y marcas de sincronización.
+                db.execSQL("""
+                    INSERT INTO $tablaNueva (
+                        $COL_ASIST_ID,
+                        $COL_ASIST_REMOTO_ID,
+                        $COL_ASIST_ALUMNO_ID,
+                        $COL_ASIST_ALUMNO_COD,
+                        $COL_ASIST_ALUMNO_NOM,
+                        $COL_ASIST_CURSO_ID,
+                        $COL_ASIST_CURSO_COD,
+                        $COL_ASIST_CURSO_NOM,
+                        $COL_ASIST_FECHA,
+                        $COL_ASIST_SESION_ID,
+                        $COL_ASIST_ESTADO,
+                        $COL_ASIST_OBS,
+                        $COL_ASIST_SINCRONIZADO,
+                        $COL_ASIST_FECHA_REG
+                    )
+                    SELECT
+                        $COL_ASIST_ID,
+                        $COL_ASIST_REMOTO_ID,
+                        $COL_ASIST_ALUMNO_ID,
+                        $COL_ASIST_ALUMNO_COD,
+                        $COL_ASIST_ALUMNO_NOM,
+                        $COL_ASIST_CURSO_ID,
+                        $COL_ASIST_CURSO_COD,
+                        $COL_ASIST_CURSO_NOM,
+                        $COL_ASIST_FECHA,
+                        $expresionSesion,
+                        $COL_ASIST_ESTADO,
+                        $COL_ASIST_OBS,
+                        $COL_ASIST_SINCRONIZADO,
+                        $COL_ASIST_FECHA_REG
+                    FROM $tabla
+                """.trimIndent())
+
+                db.execSQL("DROP TABLE $tabla")
+                db.execSQL("ALTER TABLE $tablaNueva RENAME TO $tabla")
+
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        }
     }
+
 
     private fun insertarDatosIniciales(db: SQLiteDatabase) {
         // Cursos por defecto
@@ -243,8 +342,17 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
             put(COL_ASIST_CURSO_COD, asistencia.cursoCodigo)
             put(COL_ASIST_CURSO_NOM, asistencia.cursoNombre)
             put(COL_ASIST_FECHA, asistencia.fecha)
+            put(COL_ASIST_SESION_ID, asistencia.sesionId)
             put(COL_ASIST_ESTADO, asistencia.estado.uppercase())
             put(COL_ASIST_OBS, asistencia.observacion)
+            put(COL_ASIST_FECHA_REG, asistencia.fechaRegistro.ifBlank {
+                java.text.SimpleDateFormat(
+                    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                    java.util.Locale.US
+                ).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date())
+            })
             put(COL_ASIST_SINCRONIZADO, if (asistencia.sincronizado) 1 else 0)
         }
         return db.insertWithOnConflict(
@@ -523,7 +631,13 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
             estado = cursor.getString(cursor.getColumnIndexOrThrow(COL_ASIST_ESTADO)),
             observacion = cursor.getString(cursor.getColumnIndexOrThrow(COL_ASIST_OBS)) ?: "",
             sincronizado = cursor.getInt(cursor.getColumnIndexOrThrow(COL_ASIST_SINCRONIZADO)) == 1,
-            fechaRegistro = cursor.getString(cursor.getColumnIndexOrThrow(COL_ASIST_FECHA_REG)) ?: ""
+            fechaRegistro = cursor.getString(
+                cursor.getColumnIndexOrThrow(COL_ASIST_FECHA_REG)
+            ) ?: "",
+            sesionId = cursor.getColumnIndex(COL_ASIST_SESION_ID).let { index ->
+                if (index < 0 || cursor.isNull(index)) null
+                else cursor.getInt(index)
+            }
         )
     }
 }

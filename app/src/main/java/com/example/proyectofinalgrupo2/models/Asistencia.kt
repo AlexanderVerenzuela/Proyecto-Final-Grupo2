@@ -1,3 +1,4 @@
+
 package com.example.proyectofinalgrupo2.models
 
 import java.io.Serializable
@@ -15,5 +16,7 @@ data class Asistencia(
     val estado: String,
     val observacion: String = "",
     val sincronizado: Boolean = false,
-    val fechaRegistro: String = ""
+    val fechaRegistro: String = "",
+    val sesionId: Int? = null
 ) : Serializable
+

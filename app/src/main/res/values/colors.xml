@@ -4,11 +4,11 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     
-    <!-- Primarios (Azul vibrante visible en modo oscuro) -->
-    <color name="primary">#2563EB</color>
-    <color name="primary_dark">#1D4ED8</color>
-    <color name="primary_light">#1E3A8A</color>
-    <color name="accent">#38BDF8</color>
+    <!-- Azul institucional sobre superficies oscuras -->
+    <color name="primary">#1E40AF</color>
+    <color name="primary_dark">#1E3A8A</color>
+    <color name="primary_light">#172554</color>
+    <color name="accent">#7DD3FC</color>
     
     <!-- Fondos Oscuros por Defecto -->
     <color name="bg_dark">#0F172A</color>

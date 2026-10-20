@@ -6,6 +6,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.proyectofinalgrupo2.adapters.AlumnoAsistenciaAdapter
 import com.example.proyectofinalgrupo2.api.ApiClient
@@ -45,6 +46,7 @@ class TomarAsistenciaActivity : AppCompatActivity() {
     private var finSesionMillis: Long = 0L
     private var sesionExpirada = false
     private var verificacionSesionRunnable: Runnable? = null
+    private var asistenciaGuardada = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +66,7 @@ class TomarAsistenciaActivity : AppCompatActivity() {
         }
 
         configurarToolbar()
+        configurarManejoAtras()
         configurarDatosCurso()
         configurarFecha()
         configurarRecyclerView()
@@ -75,6 +78,38 @@ class TomarAsistenciaActivity : AppCompatActivity() {
 
     private fun configurarToolbar() {
         binding.toolbarTomarAsistencia.setNavigationOnClickListener {
+            confirmarSalida()
+        }
+    }
+
+    private fun configurarManejoAtras() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                confirmarSalida()
+            }
+        })
+    }
+
+    private fun hayCambiosPendientes(): Boolean {
+        if (asistenciaGuardada) return false
+        if (sesionActual != null) return true
+        val filas = if (::adapter.isInitialized) adapter.obtenerFilas() else emptyList()
+        return filas.any { it.estado != "PRESENTE" || it.observacion.isNotBlank() }
+    }
+
+    private fun confirmarSalida() {
+        if (hayCambiosPendientes()) {
+            AlertDialog.Builder(this)
+                .setTitle("¿Salir sin guardar?")
+                .setMessage("Hay una sesión activa o cambios de asistencia no guardados en SQLite.\n\n¿Estás seguro de que deseas salir? Los datos no guardados se perderán.")
+                .setPositiveButton("Salir") { _, _ ->
+                    detenerTemporizador()
+                    finish()
+                }
+                .setNegativeButton("Continuar aquí", null)
+                .show()
+        } else {
+            detenerTemporizador()
             finish()
         }
     }
@@ -668,6 +703,10 @@ class TomarAsistenciaActivity : AppCompatActivity() {
                     asistencia.copy(id = localId)
                 )
             }
+        }
+
+        if (guardadosLocalCount > 0) {
+            asistenciaGuardada = true
         }
 
         // 2. Intentar sincronización inmediata con la API REST si hay conexión

@@ -34,7 +34,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Control de Asistencias • Cibertec Móviles I"
-            android:textColor="#E0E7FF"
+            android:textColor="@color/text_secondary"
             android:textSize="13sp"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/tvAppName" />

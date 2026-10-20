@@ -46,7 +46,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="✓  Presentes: 0"
-        android:textColor="#4CAF50"
+        android:textColor="@color/color_presente_text"
         android:textSize="17sp"
         android:textStyle="bold"
         android:padding="12dp"/>
@@ -56,7 +56,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="◷  Tardanzas: 0"
-        android:textColor="#FFB74D"
+        android:textColor="@color/color_tardanza_text"
         android:textSize="17sp"
         android:textStyle="bold"
         android:padding="12dp"/>
@@ -66,7 +66,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="✕  Ausentes: 0"
-        android:textColor="#EF5350"
+        android:textColor="@color/color_ausente_text"
         android:textSize="17sp"
         android:textStyle="bold"
         android:padding="12dp"/>
